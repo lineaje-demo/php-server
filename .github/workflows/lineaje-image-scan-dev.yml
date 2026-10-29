@@ -1,0 +1,87 @@
+name: Lineaje Image Scan Dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to scan"
+        required: true
+        default: "main"
+      version:
+        description: "Image version"
+        required: true
+        default: "v1"
+      build_patched:
+        description: "Build and rescan patched image"
+        type: boolean
+        default: false
+
+jobs:
+  scan-and-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      # Needed to pull private base images (e.g. lineaje/php-internal)
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 1. Build the original image
+      - run: docker build -t php-server:latest .
+
+      # 2. Scan + fix plan → uploads patched Dockerfile artifact
+      - name: Lineaje scan + fix plan
+        id: scan
+        uses: lineaje-actions/lineaje-actions@v1
+        with:
+          scan_type: image
+          image: php-server:latest
+          metafiles: Dockerfile
+          lineaje_cli_token: ${{ secrets.LINEAJE_CLI_TOKEN_DEV }}
+          project_name: "php-server"
+          project_version: ${{ github.event.inputs.version }}
+          org_name: "Root Organization"
+          post_scan: fix_plan
+          identity_url: https://lineaje-identity-service.commercialdev.dev.veedna.com
+          gpt_service_url: https://lineaje-gpt-service.commercialdev.dev.veedna.com
+          scim_url: https://scim-service.commercialdev.dev.veedna.com
+          scm_url: https://scm-service.commercialdev.dev.veedna.com
+          notification_url: https://notification-service.commercialdev.dev.veedna.com
+          data_service_url: https://data-service-v2-apigw.commercialdev.dev.veedna.com
+
+
+      # 3. Rebuild only when curated fixes exist (already available as-is).
+      #    Skip when premium_only=true — those fixes must be requested from
+      #    Lineaje first and are not yet available to apply.
+      - name: Build patched image
+        if: inputs.build_patched && steps.scan.outputs.premium_only == 'false' && steps.scan.outputs.fix_artifact_uploaded == 'true'
+        run: |
+          docker build \
+            -f ${{ steps.scan.outputs.patched_dockerfile }} \
+            -t php-server:latest-patched \
+            .
+
+      # 4. Rescan the patched image to confirm fixes
+      - name: Lineaje rescan (patched)
+        if: inputs.build_patched && steps.scan.outputs.premium_only == 'false' && steps.scan.outputs.fix_artifact_uploaded == 'true'
+        uses: lineaje-actions/lineaje-actions@v1
+        with:
+          scan_type: image
+          image: php-server:latest-patched
+          metafiles: Dockerfile
+          lineaje_cli_token: ${{ secrets.LINEAJE_CLI_TOKEN_DEV }}
+          project_name: "php-server"
+          project_version: "${{ github.event.inputs.version }}-patched"
+          org_name: "Root Organization"
+          post_scan: scan_only
+          identity_url: https://lineaje-identity-service.commercialdev.dev.veedna.com
+          gpt_service_url: https://lineaje-gpt-service.commercialdev.dev.veedna.com
+          scim_url: https://scim-service.commercialdev.dev.veedna.com
+          scm_url: https://scm-service.commercialdev.dev.veedna.com
+          notification_url: https://notification-service.commercialdev.dev.veedna.com
+          data_service_url: https://data-service-v2-apigw.commercialdev.dev.veedna.com
