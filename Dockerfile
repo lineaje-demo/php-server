@@ -1,4 +1,4 @@
-FROM php:8.1.34-zts-alpine3.22@sha256:fd9052257e625ab5766e500dc899c0903e7dd802484cb26e8235f4a0c6f662ad
+FROM lineaje/php-internal:8.1.34-zts-alpine3.22-lineaje
 
 WORKDIR /var/www/html
 COPY index.php .
